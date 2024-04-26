@@ -516,6 +516,8 @@ subprojects {
       }
     }
 
+    include '**/kafka/zk/**'
+
     retry {
       maxRetries = userMaxTestRetries
       maxFailures = userMaxTestRetryFailures
