@@ -18,7 +18,9 @@
 package org.apache.kafka.jmh.util;
 
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -45,6 +47,7 @@ public class ConcurrentMapBenchmark {
     private Map<Integer, Integer> concurrentHashMap;
     private Map<Integer, Integer> copyOnWriteMap;
     private int writePerLoops;
+    private Random random = new Random();
 
     @Setup
     public void setup() {
@@ -70,6 +73,19 @@ public class ConcurrentMapBenchmark {
 
     @Benchmark
     @OperationsPerInvocation(TIMES)
+    public void testConcurrentHashMapGetRandom(Blackhole blackhole) {
+        for (int i = 0; i < TIMES; i++) {
+            if (i % writePerLoops == 0) {
+                // add offset mapSize to ensure computeIfAbsent do add new entry
+                concurrentHashMap.computeIfAbsent(i + mapSize, key -> key);
+            } else {
+                blackhole.consume(concurrentHashMap.get(ThreadLocalRandom.current().nextInt()));
+            }
+        }
+    }
+
+    @Benchmark
+    @OperationsPerInvocation(TIMES)
     public void testCopyOnWriteMapGet(Blackhole blackhole) {
         for (int i = 0; i < TIMES; i++) {
             if (i % writePerLoops == 0) {
@@ -77,6 +93,19 @@ public class ConcurrentMapBenchmark {
                 copyOnWriteMap.computeIfAbsent(i + mapSize, key -> key);
             } else {
                 blackhole.consume(copyOnWriteMap.get(i % mapSize));
+            }
+        }
+    }
+
+    @Benchmark
+    @OperationsPerInvocation(TIMES)
+    public void testCopyOnWriteMapGetRandom(Blackhole blackhole) {
+        for (int i = 0; i < TIMES; i++) {
+            if (i % writePerLoops == 0) {
+                // add offset mapSize to ensure computeIfAbsent do add new entry
+                copyOnWriteMap.computeIfAbsent(i + mapSize, key -> key);
+            } else {
+                blackhole.consume(copyOnWriteMap.get(ThreadLocalRandom.current().nextInt()));
             }
         }
     }
