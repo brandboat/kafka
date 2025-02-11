@@ -320,6 +320,7 @@ public class BatchAccumulator<T> implements Closeable {
         VotersRecord voters,
         long currentTimestamp
     ) {
+        System.out.println("[bb]: appendVotersRecord " + voters.toString());
         return appendControlMessages((baseOffset, epoch, compression, buffer) ->
             MemoryRecords.withVotersRecord(
                 baseOffset,

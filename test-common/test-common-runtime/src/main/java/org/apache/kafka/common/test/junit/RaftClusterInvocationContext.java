@@ -34,6 +34,7 @@ import org.apache.kafka.metadata.bootstrap.BootstrapMetadata;
 import org.apache.kafka.metadata.storage.FormatterException;
 import org.apache.kafka.server.common.Feature;
 import org.apache.kafka.server.common.FeatureVersion;
+import org.apache.kafka.server.common.KRaftVersion;
 import org.apache.kafka.server.common.MetadataVersion;
 import org.apache.kafka.server.fault.FaultHandlerException;
 
@@ -281,6 +282,7 @@ public class RaftClusterInvocationContext implements TestTemplateInvocationConte
                 TestKitNodes nodes = new TestKitNodes.Builder()
                         .setBootstrapMetadata(BootstrapMetadata.fromVersions(clusterConfig.metadataVersion(), newFeatureLevels, "testkit"))
                         .setCombined(isCombined)
+                        .setFeature(KRaftVersion.FEATURE_NAME, (short) 1)
                         .setNumBrokerNodes(clusterConfig.numBrokers())
                         .setNumDisksPerBroker(clusterConfig.numDisksPerBroker())
                         .setPerServerProperties(clusterConfig.perServerOverrideProperties())

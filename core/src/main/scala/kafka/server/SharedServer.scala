@@ -130,6 +130,10 @@ class SharedServer(
     usedByController || usedByBroker
   }
 
+  def isUsedByController(): Boolean = synchronized {
+    usedByController
+  }
+
   /**
    * The start function called by the broker.
    */

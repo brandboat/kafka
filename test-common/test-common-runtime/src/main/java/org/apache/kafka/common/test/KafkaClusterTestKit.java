@@ -26,7 +26,9 @@ import kafka.server.KafkaRaftServer;
 import kafka.server.SharedServer;
 
 import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.RaftVoterEndpoint;
 import org.apache.kafka.common.config.internals.BrokerSecurityConfigs;
 import org.apache.kafka.common.metrics.Metrics;
 import org.apache.kafka.common.network.ListenerName;
@@ -56,17 +58,9 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.*;
 import java.util.AbstractMap.SimpleImmutableEntry;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Optional;
-import java.util.Properties;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -76,6 +70,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+import static org.apache.kafka.clients.admin.AdminClientConfig.BOOTSTRAP_CONTROLLERS_CONFIG;
 import static org.apache.kafka.server.config.ReplicationConfigs.INTER_BROKER_LISTENER_NAME_CONFIG;
 import static org.apache.kafka.server.config.ServerLogConfigs.LOG_DIRS_CONFIG;
 
@@ -166,18 +161,24 @@ public class KafkaClusterTestKit implements AutoCloseable {
             props.putIfAbsent(INTER_BROKER_LISTENER_NAME_CONFIG, brokerListenerName);
             props.putIfAbsent(KRaftConfigs.CONTROLLER_LISTENER_NAMES_CONFIG, controllerListenerName);
 
-            StringBuilder quorumVoterStringBuilder = new StringBuilder();
-            String prefix = "";
-            for (int nodeId : nodes.controllerNodes().keySet()) {
-                quorumVoterStringBuilder.append(prefix).
-                    append(nodeId).
-                    append("@").
-                    append("localhost").
-                    append(":").
-                    append(socketFactoryManager.getOrCreatePortForListener(nodeId, controllerListenerName));
-                prefix = ",";
+            String votersString;
+            if (nodes.bootstrapMetadata().featureLevel(KRaftVersion.FEATURE_NAME) > 0) {
+                int firstControllerPort = socketFactoryManager.getOrCreatePortForListener(
+                        nodes.controllerNodes().firstKey(), controllerListenerName);
+                votersString = "localhost:" + firstControllerPort;
+            } else {
+                StringBuilder quorumVoterStringBuilder = new StringBuilder();
+                String prefix = "";
+                for (int nodeId : nodes.controllerNodes().keySet()) {
+                    quorumVoterStringBuilder.append(prefix).
+                        append("localhost").
+                        append(":").
+                        append(socketFactoryManager.getOrCreatePortForListener(nodeId, controllerListenerName));
+                    prefix = ",";
+                }
+                votersString = quorumVoterStringBuilder.toString();
             }
-            props.put(QuorumConfig.QUORUM_VOTERS_CONFIG, quorumVoterStringBuilder.toString());
+            props.put(QuorumConfig.QUORUM_BOOTSTRAP_SERVERS_CONFIG, votersString);
 
             // reduce log cleaner offset map memory usage
             props.putIfAbsent(CleanerConfig.LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP, "2097152");
@@ -229,9 +230,9 @@ public class KafkaClusterTestKit implements AutoCloseable {
         }
 
         public KafkaClusterTestKit build() throws Exception {
-            Map<Integer, ControllerServer> controllers = new HashMap<>();
-            Map<Integer, BrokerServer> brokers = new HashMap<>();
-            Map<Integer, SharedServer> jointServers = new HashMap<>();
+            SortedMap<Integer, ControllerServer> controllers = new TreeMap<>();
+            SortedMap<Integer, BrokerServer> brokers = new TreeMap<>();
+            SortedMap<Integer, SharedServer> jointServers = new TreeMap<>();
             File baseDirectory = null;
             Optional<File> jaasFile = maybeSetupJaasFile();
             try {
@@ -251,7 +252,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                         Time.SYSTEM,
                         new Metrics(),
                         CompletableFuture.completedFuture(QuorumConfig.parseVoterConnections(config.quorumConfig().voters())),
-                        Collections.emptyList(),
+                        QuorumConfig.parseBootstrapServers(config.quorumConfig().bootstrapServers()),
                         faultHandlerFactory,
                         socketFactoryManager.getOrCreateSocketFactory(node.id())
                     );
@@ -279,7 +280,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                             Time.SYSTEM,
                             new Metrics(),
                             CompletableFuture.completedFuture(QuorumConfig.parseVoterConnections(config.quorumConfig().voters())),
-                            Collections.emptyList(),
+                            QuorumConfig.parseBootstrapServers(config.quorumConfig().bootstrapServers()),
                             faultHandlerFactory,
                             socketFactoryManager.getOrCreateSocketFactory(node.id())
                         );
@@ -312,6 +313,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
                     nodes,
                     controllers,
                     brokers,
+                    jointServers,
                     baseDirectory,
                     faultHandlerFactory,
                     socketFactoryManager,
@@ -353,8 +355,9 @@ public class KafkaClusterTestKit implements AutoCloseable {
     private final ExecutorService executorService;
     private final KafkaClusterThreadFactory threadFactory = new KafkaClusterThreadFactory(KAFKA_CLUSTER_THREAD_PREFIX);
     private final TestKitNodes nodes;
-    private final Map<Integer, ControllerServer> controllers;
-    private final Map<Integer, BrokerServer> brokers;
+    private final SortedMap<Integer, ControllerServer> controllers;
+    private final SortedMap<Integer, BrokerServer> brokers;
+    private final SortedMap<Integer, SharedServer> sharedServers;
     private final File baseDirectory;
     private final SimpleFaultHandlerFactory faultHandlerFactory;
     private final PreboundSocketFactoryManager socketFactoryManager;
@@ -363,8 +366,9 @@ public class KafkaClusterTestKit implements AutoCloseable {
 
     private KafkaClusterTestKit(
         TestKitNodes nodes,
-        Map<Integer, ControllerServer> controllers,
-        Map<Integer, BrokerServer> brokers,
+        SortedMap<Integer, ControllerServer> controllers,
+        SortedMap<Integer, BrokerServer> brokers,
+        SortedMap<Integer, SharedServer> sharedServers,
         File baseDirectory,
         SimpleFaultHandlerFactory faultHandlerFactory,
         PreboundSocketFactoryManager socketFactoryManager,
@@ -380,6 +384,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
         this.nodes = nodes;
         this.controllers = controllers;
         this.brokers = brokers;
+        this.sharedServers = sharedServers;
         this.baseDirectory = baseDirectory;
         this.faultHandlerFactory = faultHandlerFactory;
         this.socketFactoryManager = socketFactoryManager;
@@ -443,17 +448,23 @@ public class KafkaClusterTestKit implements AutoCloseable {
                 formatter.setMetadataLogDirectory(Optional.empty());
             }
             if (nodes.bootstrapMetadata().featureLevel(KRaftVersion.FEATURE_NAME) > 0) {
-                StringBuilder dynamicVotersBuilder = new StringBuilder();
-                String prefix = "";
-                for (TestKitNode controllerNode : nodes.controllerNodes().values()) {
-                    int port = socketFactoryManager.
+//                StringBuilder dynamicVotersBuilder = new StringBuilder();
+//                String prefix = "";
+//                for (TestKitNode controllerNode : nodes.controllerNodes().values()) {
+//                    int port = socketFactoryManager.
+//                        getOrCreatePortForListener(controllerNode.id(), controllerListenerName);
+//                    dynamicVotersBuilder.append(prefix);
+//                    prefix = ",";
+//                    dynamicVotersBuilder.append(String.format("%d@localhost:%d:%s",
+//                        controllerNode.id(), port, controllerNode.metadataDirectoryId()));
+//                }
+                // TODO: beware the test that related to dynamic quorum
+                TestKitNode controllerNode = nodes.controllerNodes().get(nodes.controllerNodes().firstKey());
+                int port = socketFactoryManager.
                         getOrCreatePortForListener(controllerNode.id(), controllerListenerName);
-                    dynamicVotersBuilder.append(prefix);
-                    prefix = ",";
-                    dynamicVotersBuilder.append(String.format("%d@localhost:%d:%s",
-                        controllerNode.id(), port, controllerNode.metadataDirectoryId()));
-                }
-                formatter.setInitialControllers(DynamicVoters.parse(dynamicVotersBuilder.toString()));
+                String dynamicVoters = String.format("%d@localhost:%d:%s",
+                        controllerNode.id(), port, controllerNode.metadataDirectoryId());
+                formatter.setInitialControllers(DynamicVoters.parse(dynamicVoters));
             }
             formatter.run();
         } catch (Exception e) {
@@ -461,7 +472,7 @@ public class KafkaClusterTestKit implements AutoCloseable {
         }
     }
 
-    public void startup() throws ExecutionException, InterruptedException {
+    public void startup() throws ExecutionException, InterruptedException, IOException {
         List<Future<?>> futures = new ArrayList<>();
         try {
             // Note the startup order here is chosen to be consistent with
@@ -469,11 +480,41 @@ public class KafkaClusterTestKit implements AutoCloseable {
             for (ControllerServer controller : controllers.values()) {
                 futures.add(executorService.submit(controller::startup));
             }
+
+            // We use dynamic quorum when using kraft.version 1,
+            // doing this force use to wait sharedServer to be used by controller first then broker under CO_RAFT type
+            // if sharedServer is started by broker, voter endpoint will be empty
+            // see https://github.com/apache/kafka/blob/trunk/core/src/main/scala/kafka/server/SharedServer.scala#L138
+            if (nodes.bootstrapMetadata().featureLevel(KRaftVersion.FEATURE_NAME) > 0) {
+                for (int nodeId : controllers.keySet()) {
+                    if (nodes.isCombined(nodeId)) {
+                        TestUtils.waitForCondition(() -> sharedServers.get(nodeId).isUsedByController(),
+                                "sharedServer " + nodeId + " is not used by controller");
+                    }
+                }
+            }
+
             for (BrokerServer broker : brokers.values()) {
                 futures.add(executorService.submit(broker::startup));
             }
             for (Future<?> future: futures) {
                 future.get();
+            }
+
+            if (nodes.bootstrapMetadata().featureLevel(KRaftVersion.FEATURE_NAME) > 0) {
+                Map<Integer, ControllerServer> joinLater = new HashMap<>(controllers);
+                joinLater.remove(controllers.firstKey());
+                try (Admin admin = Admin.create(Map.of(BOOTSTRAP_CONTROLLERS_CONFIG, bootstrapControllers()))) {
+                    for (Entry<Integer, ControllerServer> entry : joinLater.entrySet()) {
+                        int controllerNodeId = entry.getKey();
+                        TestKitNode controllerNode = nodes.controllerNodes().get(controllerNodeId);
+                        admin.addRaftVoter(
+                                controllerNodeId,
+                                controllerNode.metadataDirectoryId(),
+                                Set.of(new RaftVoterEndpoint(controllerListenerName, "localhost",
+                                        socketFactoryManager.getOrCreatePortForListener(controllerNodeId, controllerListenerName))));
+                    }
+                }
             }
         } catch (Exception e) {
             for (Future<?> future: futures) {
@@ -519,11 +560,11 @@ public class KafkaClusterTestKit implements AutoCloseable {
 
         public Properties build() {
             if (usingBootstrapControllers) {
-                properties.setProperty(AdminClientConfig.BOOTSTRAP_CONTROLLERS_CONFIG, bootstrapControllers());
+                properties.setProperty(BOOTSTRAP_CONTROLLERS_CONFIG, bootstrapControllers());
                 properties.remove(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG);
             } else {
                 properties.setProperty(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers());
-                properties.remove(AdminClientConfig.BOOTSTRAP_CONTROLLERS_CONFIG);
+                properties.remove(BOOTSTRAP_CONTROLLERS_CONFIG);
             }
             return properties;
         }

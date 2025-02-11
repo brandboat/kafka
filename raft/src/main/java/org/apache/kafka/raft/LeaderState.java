@@ -374,6 +374,7 @@ public class LeaderState<T> implements EpochState {
                                 .setVersion(kraftVersionAtEpochStart.kraftVersionRecordVersion())
                                 .setKRaftVersion(kraftVersionAtEpochStart.featureLevel())
                         );
+                        System.out.println("[bb]: appendStateOfEpochControlRecords: Writing voters record at offset " + offset);
                         builder.appendVotersMessage(
                             currentTimeMs,
                             updatedVoterSet.toVotersRecord(

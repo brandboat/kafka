@@ -258,6 +258,8 @@ public class Formatter {
         featureLevels = calculateEffectiveFeatureLevels();
         this.bootstrapMetadata = calculateBootstrapMetadata();
         doFormat(bootstrapMetadata);
+
+        featureLevels.forEach((k, v) -> printStream.println(k + ":" + v));
     }
 
     /**

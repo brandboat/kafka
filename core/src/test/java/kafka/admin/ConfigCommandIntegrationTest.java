@@ -145,7 +145,8 @@ public class ConfigCommandIntegrationTest {
         assertEquals("Completed updating config for client-metric cm.", message);
     }
 
-    @ClusterTest
+    @ClusterTest(controllers = 3)
+//    @ClusterTest(types = {Type.CO_KRAFT})
     public void testDynamicBrokerConfigUpdateUsingKraft() throws Exception {
         List<String> alterOpts = generateDefaultAlterOpts(cluster.bootstrapServers());
 
