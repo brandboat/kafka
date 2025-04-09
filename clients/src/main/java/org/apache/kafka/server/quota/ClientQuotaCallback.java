@@ -101,9 +101,11 @@ public interface ClientQuotaCallback extends Configurable {
      * This is useful if quota computation takes partitions into account.
      * Topics that are being deleted will not be included in `cluster`.
      *
+     * @deprecated since 4.1.0, please use {@link ClientQuotaCallbackBase#updateClusterMetadata(ClusterMetadata)} instead
      * @param cluster Cluster metadata including partitions and their leaders if known
      * @return true if quotas have changed and metric configs may need to be updated
      */
+    @Deprecated(since = "4.1.0", forRemoval = true)
     boolean updateClusterMetadata(Cluster cluster);
 
     /**

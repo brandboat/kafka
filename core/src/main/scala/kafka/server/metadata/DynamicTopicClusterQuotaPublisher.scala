@@ -20,6 +20,7 @@ import org.apache.kafka.image.{MetadataDelta, MetadataImage}
 import org.apache.kafka.image.loader.LoaderManifest
 import org.apache.kafka.metadata.MetadataCache
 import org.apache.kafka.server.fault.FaultHandler
+import org.apache.kafka.server.quota.ClientQuotaCallbackBase
 
 /**
  * Publishing dynamic topic or cluster changes to the client quota manager.
@@ -52,12 +53,23 @@ class DynamicTopicClusterQuotaPublisher (
     try {
       quotaManagers.clientQuotaCallbackPlugin().ifPresent(plugin => {
         if (delta.topicsDelta() != null || delta.clusterDelta() != null) {
-          val cluster = MetadataCache.toCluster(clusterId, newImage)
-          if (plugin.get().updateClusterMetadata(cluster)) {
-            quotaManagers.fetch.updateQuotaMetricConfigs()
-            quotaManagers.produce.updateQuotaMetricConfigs()
-            quotaManagers.request.updateQuotaMetricConfigs()
-            quotaManagers.controllerMutation.updateQuotaMetricConfigs()
+          val clientQuotaCallback = plugin.get()
+          if (clientQuotaCallback.isInstanceOf[ClientQuotaCallbackBase]) {
+            val cluster = MetadataCache.toCluster(clusterId, newImage)
+            if (clientQuotaCallback.updateClusterMetadata(cluster)) {
+              quotaManagers.fetch.updateQuotaMetricConfigs()
+              quotaManagers.produce.updateQuotaMetricConfigs()
+              quotaManagers.request.updateQuotaMetricConfigs()
+              quotaManagers.controllerMutation.updateQuotaMetricConfigs()
+            }
+          } else {
+            val cluster = MetadataCache.toCluster(clusterId, newImage)
+            if (clientQuotaCallback.updateClusterMetadata(cluster)) {
+              quotaManagers.fetch.updateQuotaMetricConfigs()
+              quotaManagers.produce.updateQuotaMetricConfigs()
+              quotaManagers.request.updateQuotaMetricConfigs()
+              quotaManagers.controllerMutation.updateQuotaMetricConfigs()
+            }
           }
         }
       })

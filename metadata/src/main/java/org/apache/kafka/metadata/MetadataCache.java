@@ -17,6 +17,7 @@
 package org.apache.kafka.metadata;
 
 import org.apache.kafka.common.Cluster;
+import org.apache.kafka.common.ClusterResource;
 import org.apache.kafka.common.Node;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
@@ -32,6 +33,7 @@ import org.apache.kafka.common.network.ListenerName;
 import org.apache.kafka.image.MetadataImage;
 import org.apache.kafka.server.common.FinalizedFeatures;
 import org.apache.kafka.server.common.MetadataVersion;
+import org.apache.kafka.server.quota.ClusterMetadata;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -144,6 +146,56 @@ public interface MetadataCache extends ConfigRepository {
         Function<String, Integer> topicPartitionStartIndex,
         int maximumNumberOfPartitions,
         boolean ignoreTopicsWithExceptions);
+
+    static ClusterMetadata toClusterMetadata(String clusterId, MetadataImage image) {
+        return new ClusterMetadata(){
+            private Map<Integer, List<Node>> brokers;
+            private List<PartitionInfo> partitionInfos;
+            private final ClusterResource clusterResource = new ClusterResource(clusterId);
+
+            @Override
+            public Map<Integer, List<Node>> brokers() {
+                if (brokers == null) {
+                    this.brokers = image.cluster().brokers().values().stream()
+                            .filter(broker -> !broker.fenced())
+                            .collect(Collectors.toMap(BrokerRegistration::id, BrokerRegistration::nodes));;
+                }
+                return brokers;
+            }
+
+            @Override
+            public List<PartitionInfo> partitionInfos() {
+                if (partitionInfos == null) {
+                    List<PartitionInfo> partitionInfos = new ArrayList<>();
+                    image.topics().topicsByName().values().forEach(topic ->
+                        topic.partitions().forEach((partitionId, partition) -> {
+                            List<Node> nodes = brokers().get(partition.leader);
+                            if (nodes != null) {
+                                nodes.forEach(node ->
+                                        partitionInfos.add(new PartitionInfo(
+                                                topic.name(),
+                                                partitionId,
+                                                node,
+                                                toArray(partition.replicas, brokers()),
+                                                toArray(partition.isr, brokers()),
+                                                getOfflineReplicas(image, partition).stream()
+                                                        .map(brokers::get)
+                                                        .flatMap(Collection::stream)
+                                                        .toArray(Node[]::new)
+                                )));
+                            }
+                        }));
+                    this.partitionInfos = partitionInfos;
+                }
+                return partitionInfos;
+            }
+
+            @Override
+            public ClusterResource clusterResource() {
+                return clusterResource;
+            }
+        };
+    }
 
     static Cluster toCluster(String clusterId, MetadataImage image) {
         Map<Integer, List<Node>> brokerToNodes = new HashMap<>();
