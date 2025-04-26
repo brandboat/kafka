@@ -17,6 +17,7 @@
 package org.apache.kafka.common.memory;
 
 import java.nio.ByteBuffer;
+import java.util.concurrent.ConcurrentSkipListMap;
 
 
 /**
@@ -25,14 +26,22 @@ import java.nio.ByteBuffer;
  */
 public interface MemoryPool {
     MemoryPool NONE = new MemoryPool() {
+        private final ConcurrentSkipListMap<Integer, ByteBuffer> buffers = new ConcurrentSkipListMap<>();
         @Override
         public ByteBuffer tryAllocate(int sizeBytes) {
-            return ByteBuffer.allocate(sizeBytes);
+//            return ByteBuffer.allocate(sizeBytes);
+            var key = buffers.ceilingKey(sizeBytes);
+            if (key == null) return ByteBuffer.allocate(sizeBytes);
+            var value = buffers.remove(key);
+            if (value == null) return ByteBuffer.allocate(sizeBytes);
+            value.limit(sizeBytes);
+            return value;
         }
 
         @Override
         public void release(ByteBuffer previouslyAllocated) {
-            //nop
+            previouslyAllocated.clear();
+            buffers.put(previouslyAllocated.capacity(), previouslyAllocated);
         }
 
         @Override
