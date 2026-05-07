@@ -488,6 +488,11 @@ public abstract class AbstractKafkaConfig extends AbstractConfig {
         return getLong(ServerConfigs.SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG);
     }
 
+    // ********* Replication configuration ***********
+    public int defaultReplicationFactor() {
+        return getInt(ReplicationConfigs.DEFAULT_REPLICATION_FACTOR_CONFIG);
+    }
+
     // ********* Log Configuration **********
 
     public boolean autoCreateTopicsEnable() {

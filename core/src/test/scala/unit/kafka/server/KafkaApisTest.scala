@@ -92,7 +92,7 @@ import org.apache.kafka.network.metrics.{RequestChannelMetrics, RequestMetrics}
 import org.apache.kafka.raft.{KRaftConfigs, QuorumConfig}
 import org.apache.kafka.security.authorizer.AclEntry
 import org.apache.kafka.server.FetchContext.FullFetchContext
-import org.apache.kafka.server.{ClientMetricsManager, FetchManager, FetchSessionCacheShard, SimpleApiVersionManager}
+import org.apache.kafka.server.{AutoTopicCreationManager, ClientMetricsManager, FetchManager, FetchSessionCacheShard, SimpleApiVersionManager}
 import org.apache.kafka.server.authorizer.{Action, AuthorizationResult, Authorizer}
 import org.apache.kafka.server.common.{FeatureVersion, FinalizedFeatures, GroupVersion, KRaftVersion, MetadataVersion, RequestLocal, ShareVersion, StreamsVersion, TransactionVersion}
 import org.apache.kafka.server.config.{ReplicationConfigs, ServerConfigs, ServerLogConfigs}
@@ -967,7 +967,7 @@ class KafkaApisTest extends Logging {
     assertEquals(expectedMetadataResponse, response.topicMetadata())
 
     if (enableAutoTopicCreation) {
-      assertTrue(capturedRequest.getValue.isDefined)
+      assertTrue(capturedRequest.getValue.isPresent)
       assertEquals(request.context, capturedRequest.getValue.get)
     }
   }
@@ -975,8 +975,8 @@ class KafkaApisTest extends Logging {
   private def verifyTopicCreation(topicName: String,
                                   enableAutoTopicCreation: Boolean,
                                   isInternal: Boolean,
-                                  request: RequestChannel.Request): ArgumentCaptor[Option[RequestContext]] = {
-    val capturedRequest: ArgumentCaptor[Option[RequestContext]] = ArgumentCaptor.forClass(classOf[Option[RequestContext]])
+                                  request: RequestChannel.Request): ArgumentCaptor[Optional[RequestContext]] = {
+    val capturedRequest: ArgumentCaptor[Optional[RequestContext]] = ArgumentCaptor.forClass(classOf[Optional[RequestContext]])
     if (enableAutoTopicCreation) {
 
       when(clientControllerQuotaManager.newPermissiveQuotaFor(
@@ -985,10 +985,10 @@ class KafkaApisTest extends Logging {
       )).thenReturn(ControllerMutationQuota.UNBOUNDED_CONTROLLER_MUTATION_QUOTA)
 
       when(autoTopicCreationManager.createTopics(
-        ArgumentMatchers.eq(Set(topicName)),
+        ArgumentMatchers.eq(util.Set.of(topicName)),
         ArgumentMatchers.eq(ControllerMutationQuota.UNBOUNDED_CONTROLLER_MUTATION_QUOTA),
         capturedRequest.capture())).thenReturn(
-        Seq(new MetadataResponseTopic()
+        util.List.of(new MetadataResponseTopic()
         .setErrorCode(Errors.UNKNOWN_TOPIC_OR_PARTITION.code())
         .setIsInternal(isInternal)
         .setName(topicName))
@@ -11406,11 +11406,11 @@ class KafkaApisTest extends Logging {
     kafkaApis = createKafkaApis()
     kafkaApis.handle(requestChannelRequest, RequestLocal.noCaching)
 
-    val missingTopics = Map("test" -> new CreatableTopic())
+    val missingTopics = util.Map.of("test", new CreatableTopic())
     val streamsGroupHeartbeatResponse = new StreamsGroupHeartbeatResponseData()
       .setMemberId("member")
 
-    future.complete(new StreamsGroupHeartbeatResult(streamsGroupHeartbeatResponse, missingTopics.asJava))
+    future.complete(new StreamsGroupHeartbeatResult(streamsGroupHeartbeatResponse, missingTopics))
     val response = verifyNoThrottling[StreamsGroupHeartbeatResponse](requestChannelRequest)
     assertEquals(streamsGroupHeartbeatResponse, response.data)
     verify(autoTopicCreationManager).createStreamsInternalTopics(any(), any(), anyLong())
@@ -11492,8 +11492,8 @@ class KafkaApisTest extends Logging {
 
     // Mock AutoTopicCreationManager to return cached errors
     val mockAutoTopicCreationManager = mock(classOf[AutoTopicCreationManager])
-    when(mockAutoTopicCreationManager.getStreamsInternalTopicCreationErrors(ArgumentMatchers.eq(Set("test-topic")), any()))
-      .thenReturn(Map("test-topic" -> "INVALID_REPLICATION_FACTOR"))
+    when(mockAutoTopicCreationManager.getStreamsInternalTopicCreationErrors(ArgumentMatchers.eq(util.Set.of("test-topic")), any()))
+      .thenReturn(util.Map.of("test-topic", "INVALID_REPLICATION_FACTOR"))
     // Mock the createStreamsInternalTopics method to do nothing (simulate topic creation attempt)
     doNothing().when(mockAutoTopicCreationManager).createStreamsInternalTopics(any(), any(), anyLong())
 
@@ -11525,7 +11525,7 @@ class KafkaApisTest extends Logging {
     
     // Verify that createStreamsInternalTopics was called
     verify(mockAutoTopicCreationManager).createStreamsInternalTopics(any(), any(), anyLong())
-    verify(mockAutoTopicCreationManager).getStreamsInternalTopicCreationErrors(ArgumentMatchers.eq(Set("test-topic")), any())
+    verify(mockAutoTopicCreationManager).getStreamsInternalTopicCreationErrors(ArgumentMatchers.eq(util.Set.of("test-topic")), any())
   }
 
   @ParameterizedTest
